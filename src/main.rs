@@ -168,7 +168,7 @@ async fn main() -> std::io::Result<()> {
     // This checks allows to unwrap read_to_string also it can panic on other errors
     // TODO: Account for less likely errors returned by OpenOptions
     if !file_with_urls.exists() {
-        println!("Filepath \"{}\" doesn't exist", file_with_urls.display());
+        println!("Filepath \"{}\" doesn't exist\nCan't read its content", file_with_urls.display());
         return Ok(());
     }
     let contents = fs::read_to_string(file_with_urls).unwrap();
