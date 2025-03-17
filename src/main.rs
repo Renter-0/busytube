@@ -7,6 +7,7 @@ use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
 use std::path::Path;
 use std::time::Duration;
+use std::env;
 
 #[derive(Debug, Clone)]
 struct YoutubeVideoUrl {
@@ -159,11 +160,17 @@ impl Metada {
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    // TODO: Replace hard coded paths with CLI inputs
-    let file_with_urls = Path::new("url.md");
-    let vault = Path::new(r"C:\Users\PC\Documents\obsidian");
-    let videos = vault.join(r"storage\videos.md");
-    let thumbnails = vault.join(r"storage\thumbnails");
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        println!("No arguments supplied\nUsage:\nbusytube URLFILE VAULTPATH");
+        return Ok(());
+    }
+    let file_with_urls = Path::new(&args[1]);
+    let vault = Path::new(&args[2]);
+
+    let videos = vault.join(r"storage/videos.md");
+    let thumbnails = vault.join(r"storage/thumbnails");
 
     // This checks allows to unwrap read_to_string also it can panic on other errors
     // TODO: Account for less likely errors returned by OpenOptions
