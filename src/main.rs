@@ -3,11 +3,11 @@ use futures::{stream, StreamExt};
 use regex::Regex;
 use reqwest::{Client, Url};
 use scraper::{Html, Selector};
+use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
 use std::path::Path;
 use std::time::Duration;
-use std::env;
 
 #[derive(Debug, Clone)]
 struct YoutubeVideoUrl {
@@ -137,8 +137,8 @@ impl Metada {
         client: Client,
     ) -> Result<(), std::io::ErrorKind> {
         if !thumbnail_dir.exists() {
-            let dir_builder = std::fs::DirBuilder::new();
-            dir_builder.create(thumbnail_dir).unwrap();
+            let mut dir_builder = std::fs::DirBuilder::new();
+            dir_builder.recursive(true).create(thumbnail_dir).unwrap();
         }
         if !thumbnail_dir.is_dir() {
             return Err(std::io::ErrorKind::NotADirectory);
@@ -169,13 +169,17 @@ async fn main() -> std::io::Result<()> {
     let file_with_urls = Path::new(&args[1]);
     let vault = Path::new(&args[2]);
 
-    let videos = vault.join(r"storage/videos.md");
-    let thumbnails = vault.join(r"storage/thumbnails");
+    // Construct OS independend paths
+    let videos = vault.join("storage").join("videos.md");
+    let thumbnails = vault.join("storage").join("thumbnails");
 
     // This checks allows to unwrap read_to_string also it can panic on other errors
     // TODO: Account for less likely errors returned by OpenOptions
     if !file_with_urls.exists() {
-        println!("Filepath \"{}\" doesn't exist\nCan't read its content", file_with_urls.display());
+        println!(
+            "Filepath \"{}\" doesn't exist\nCan't read its content",
+            file_with_urls.display()
+        );
         return Ok(());
     }
     let contents = fs::read_to_string(file_with_urls).unwrap();
@@ -195,7 +199,11 @@ async fn main() -> std::io::Result<()> {
             .unwrap();
 
         // Append extracted metadata to videos' file in specified format
-        let mut vid = OpenOptions::new().create(true).append(true).open(&videos).unwrap();
+        let mut vid = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&videos)
+            .unwrap();
         if let Err(e) = writeln!(
             vid,
             "[link::[{}]({})], [duration::{}min], ![](thumbnails/{})\n\n",
