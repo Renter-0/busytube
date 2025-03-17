@@ -188,7 +188,7 @@ async fn main() -> std::io::Result<()> {
             .unwrap();
 
         // Append extracted metadata to videos' file in specified format
-        let mut vid = OpenOptions::new().append(true).open(&videos).unwrap();
+        let mut vid = OpenOptions::new().create(true).append(true).open(&videos).unwrap();
         if let Err(e) = writeln!(
             vid,
             "[link::[{}]({})], [duration::{}min], ![](thumbnails/{})\n\n",
