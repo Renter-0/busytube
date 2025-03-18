@@ -1,3 +1,4 @@
+// TODO: Properly handle error handling
 use futures::{stream, StreamExt};
 use regex::Regex;
 use reqwest::{Client, Url};
@@ -59,26 +60,38 @@ pub struct Metada {
     pub img_name: String,
 }
 
-pub async fn get_htmls(client: Client, links: Vec<YoutubeVideoUrl>) -> Vec<String> {
+pub async fn get_htmls(client: Client, links: Vec<YoutubeVideoUrl>) -> Vec<Vec<u8>> {
     // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
+    // TODO: Determine how large content needs to be
+    // TODO: Consider removing to u8 or u16 to reduce memory footprint and convert it to usize
+    // afterwards
+    const MAX_BYTES: usize = 100;
     let concurent_requests = links.len();
     stream::iter(links)
         .map(|url| {
             let client = &client;
+            // Download content up to `MAX_BYTES`
             async move {
-                let response = client.get(url.inner).send().await.unwrap();
-                // TODO: Rewrite to download only the first N bytes needed for parser
-                response.text().await.unwrap()
+                let mut byte_stream = client.get(url.inner).send().await.unwrap().bytes_stream();
+                let mut collected_chunks = Vec::new();
+                while let Some(chunk) = byte_stream.next().await {
+                    let chunk = chunk.unwrap();
+                    collected_chunks.extend_from_slice(&chunk);
+                    if collected_chunks.len() >= MAX_BYTES {
+                        collected_chunks.truncate(MAX_BYTES);
+                        break;
+                    }
+                }
+                collected_chunks
             }
         })
         .buffer_unordered(concurent_requests)
-        .collect::<Vec<String>>()
+        .collect()
         .await
 }
 
 impl Metada {
     // NOTE: Most of the parts that can error here are due to not getting a valid youtube URL
-    // TODO: Rewrite new as it shouldn't panic
     pub fn new(html: Html) -> Metada {
         let title_selector = Selector::parse("title").unwrap();
         let title = html.select(&title_selector).next().unwrap().inner_html();
