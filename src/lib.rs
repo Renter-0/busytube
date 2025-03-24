@@ -60,7 +60,8 @@ pub struct Metada {
     pub img_name: String,
 }
 
-pub async fn get_htmls(client: Client, links: Vec<YoutubeVideoUrl>) -> Vec<Vec<u8>> {
+// TODO: Consider using another data type for the return type
+pub async fn download_htmls(client: Client, links: Vec<YoutubeVideoUrl>) -> Vec<Vec<u8>> {
     // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
     // TODO: Determine how large content needs to be
     // TODO: Consider removing to u8 or u16 to reduce memory footprint and convert it to usize
@@ -165,5 +166,18 @@ impl Metada {
             .unwrap();
         file.write_all(&contents).unwrap();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{download_htmls, Client, YoutubeVideoUrl};
+    #[tokio::test]
+    async fn test_download_htmls_length() {
+        let client = Client::new();
+        let url: Vec<YoutubeVideoUrl> =
+            vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
+        let chunk = download_htmls(client, url).await;
+        assert_eq!(100 as usize, chunk[0].len());
     }
 }
