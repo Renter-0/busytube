@@ -7,6 +7,7 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::time::Duration;
 
+pub const MAX_BYTES: usize = 569993;
 #[derive(Debug, Clone)]
 pub struct YoutubeVideoUrl {
     inner: Url,
@@ -61,12 +62,9 @@ pub struct Metada {
 }
 
 // TODO: Consider using another data type for the return type
-pub async fn download_htmls(client: Client, links: Vec<YoutubeVideoUrl>) -> Vec<Vec<u8>> {
+pub async fn download_htmls(client: Client, links: Vec<YoutubeVideoUrl>, max_bytes: usize) -> Vec<Vec<u8>> {
     // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
-    // TODO: Determine how large content needs to be
-    // TODO: Consider removing to u8 or u16 to reduce memory footprint and convert it to usize
     // afterwards
-    const MAX_BYTES: usize = 100;
     let concurent_requests = links.len();
     stream::iter(links)
         .map(|url| {
@@ -78,8 +76,8 @@ pub async fn download_htmls(client: Client, links: Vec<YoutubeVideoUrl>) -> Vec<
                 while let Some(chunk) = byte_stream.next().await {
                     let chunk = chunk.unwrap();
                     collected_chunks.extend_from_slice(&chunk);
-                    if collected_chunks.len() >= MAX_BYTES {
-                        collected_chunks.truncate(MAX_BYTES);
+                    if collected_chunks.len() >= max_bytes {
+                        collected_chunks.truncate(max_bytes);
                         break;
                     }
                 }
