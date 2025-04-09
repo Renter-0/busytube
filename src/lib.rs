@@ -169,13 +169,29 @@ impl Metada {
 
 #[cfg(test)]
 mod tests {
-    use super::{download_htmls, Client, YoutubeVideoUrl};
+    use super::{download_htmls, Client, YoutubeVideoUrl, MAX_BYTES, Metada, Html};
     #[tokio::test]
     async fn test_download_htmls_length() {
         let client = Client::new();
         let url: Vec<YoutubeVideoUrl> =
             vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
-        let chunk = download_htmls(client, url).await;
-        assert_eq!(100 as usize, chunk[0].len());
+        let chunk = download_htmls(client, url, MAX_BYTES).await;
+        assert_eq!(MAX_BYTES, chunk[0].len());
+    }
+
+    #[tokio::test]
+    async fn test_is_downloaded_fragment_sufficient_for_parsing() {
+        let client = Client::new();
+        let urls: Vec<YoutubeVideoUrl> = vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
+        let fragments = download_htmls(client, urls, MAX_BYTES).await;
+        let fragment = String::from_utf8(fragments[0].clone()).unwrap();
+        let html = Html::parse_document(fragment.as_str());
+
+        let meta = Metada::new(html);
+
+        assert_eq!(meta.url.inner.as_str(), "https://www.youtube.com/watch?v=h9Z4oGN89MU");
+        assert_eq!(meta.duration.as_millis(), 1709569);
+        assert_eq!(meta.title, "How do Graphics Cards Work?  Exploring GPU Architecture - YouTube");
+        assert_eq!(meta.img_url.as_str(), "https://i.ytimg.com/vi/h9Z4oGN89MU/maxresdefault.jpg");
     }
 }
