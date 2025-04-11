@@ -61,7 +61,11 @@ pub struct Metada {
     pub img_name: String,
 }
 
-pub async fn download_htmls(client: &Client, links: Vec<YoutubeVideoUrl>, max_bytes: usize) -> Vec<Vec<u8>> {
+pub async fn download_htmls(
+    client: &Client,
+    links: Vec<YoutubeVideoUrl>,
+    max_bytes: usize,
+) -> Vec<Vec<u8>> {
     // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
     // afterwards
     let concurent_requests = links.len();
@@ -82,7 +86,9 @@ pub async fn download_htmls(client: &Client, links: Vec<YoutubeVideoUrl>, max_by
 
                     // Terminate download if max_bytes were reached
                     remaining_bytes = remaining_bytes.saturating_sub(chunk.len());
-                    if remaining_bytes == 0 { break; }
+                    if remaining_bytes == 0 {
+                        break;
+                    }
                 }
                 collected_chunks
             }
@@ -172,7 +178,7 @@ impl Metada {
 
 #[cfg(test)]
 mod tests {
-    use super::{download_htmls, Client, YoutubeVideoUrl, MAX_BYTES, Metada, Html};
+    use super::{download_htmls, Client, Html, Metada, YoutubeVideoUrl, MAX_BYTES};
     #[tokio::test]
     async fn test_download_htmls_length() {
         let client = Client::new();
@@ -185,18 +191,26 @@ mod tests {
     #[tokio::test]
     async fn test_is_downloaded_fragment_sufficient_for_parsing() {
         let client = Client::new();
-        let urls: Vec<YoutubeVideoUrl> = vec![
-            YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()
-        ];
+        let urls: Vec<YoutubeVideoUrl> =
+            vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
         let fragments = download_htmls(&client, urls, MAX_BYTES).await;
         let fragment = String::from_utf8(fragments[0].clone()).unwrap();
         let html = Html::parse_document(fragment.as_str());
 
         let meta = Metada::new(html);
 
-        assert_eq!(meta.url.inner.as_str(), "https://www.youtube.com/watch?v=h9Z4oGN89MU");
+        assert_eq!(
+            meta.url.inner.as_str(),
+            "https://www.youtube.com/watch?v=h9Z4oGN89MU"
+        );
         assert_eq!(meta.duration.as_millis(), 1709569);
-        assert_eq!(meta.title, "How do Graphics Cards Work?  Exploring GPU Architecture - YouTube");
-        assert_eq!(meta.img_url.as_str(), "https://i.ytimg.com/vi/h9Z4oGN89MU/maxresdefault.jpg");
+        assert_eq!(
+            meta.title,
+            "How do Graphics Cards Work?  Exploring GPU Architecture - YouTube"
+        );
+        assert_eq!(
+            meta.img_url.as_str(),
+            "https://i.ytimg.com/vi/h9Z4oGN89MU/maxresdefault.jpg"
+        );
     }
 }
