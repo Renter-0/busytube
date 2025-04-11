@@ -40,7 +40,7 @@ async fn main() -> std::io::Result<()> {
         .collect();
 
     let client = Client::new();
-    let htmls = download_htmls(client.clone(), urls, MAX_BYTES).await;
+    let htmls = download_htmls(&client, urls, MAX_BYTES).await;
     for text in htmls {
         let html = String::from_utf8(text).unwrap();
         let meta = Metada::new(Html::parse_document(html.as_str()));

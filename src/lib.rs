@@ -61,13 +61,12 @@ pub struct Metada {
     pub img_name: String,
 }
 
-pub async fn download_htmls(client: Client, links: Vec<YoutubeVideoUrl>, max_bytes: usize) -> Vec<Vec<u8>> {
+pub async fn download_htmls(client: &Client, links: Vec<YoutubeVideoUrl>, max_bytes: usize) -> Vec<Vec<u8>> {
     // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
     // afterwards
     let concurent_requests = links.len();
     stream::iter(links)
         .map(|url| {
-            let client = &client;
             // Download content up to max_bytes
             async move {
                 let mut byte_stream = client.get(url.inner).send().await.unwrap().bytes_stream();
@@ -179,7 +178,7 @@ mod tests {
         let client = Client::new();
         let url: Vec<YoutubeVideoUrl> =
             vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
-        let chunk = download_htmls(client, url, MAX_BYTES).await;
+        let chunk = download_htmls(&client, url, MAX_BYTES).await;
         assert_eq!(MAX_BYTES, chunk[0].len());
     }
 
@@ -189,7 +188,7 @@ mod tests {
         let urls: Vec<YoutubeVideoUrl> = vec![
             YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()
         ];
-        let fragments = download_htmls(client, urls, MAX_BYTES).await;
+        let fragments = download_htmls(&client, urls, MAX_BYTES).await;
         let fragment = String::from_utf8(fragments[0].clone()).unwrap();
         let html = Html::parse_document(fragment.as_str());
 
