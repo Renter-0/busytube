@@ -61,7 +61,6 @@ pub struct Metada {
     pub img_name: String,
 }
 
-// TODO: Consider using another data type for the return type
 pub async fn download_htmls(client: Client, links: Vec<YoutubeVideoUrl>, max_bytes: usize) -> Vec<Vec<u8>> {
     // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
     // afterwards
@@ -69,17 +68,22 @@ pub async fn download_htmls(client: Client, links: Vec<YoutubeVideoUrl>, max_byt
     stream::iter(links)
         .map(|url| {
             let client = &client;
-            // Download content up to `MAX_BYTES`
+            // Download content up to max_bytes
             async move {
                 let mut byte_stream = client.get(url.inner).send().await.unwrap().bytes_stream();
-                let mut collected_chunks = Vec::new();
+                let mut collected_chunks = Vec::with_capacity(max_bytes);
+                let mut remaining_bytes = max_bytes;
+
                 while let Some(chunk) = byte_stream.next().await {
                     let chunk = chunk.unwrap();
-                    collected_chunks.extend_from_slice(&chunk);
-                    if collected_chunks.len() >= max_bytes {
-                        collected_chunks.truncate(max_bytes);
-                        break;
-                    }
+
+                    // Prevent memory re-allocations if chunk exceeds max_bytes
+                    let to_take = std::cmp::min(remaining_bytes, chunk.len());
+                    collected_chunks.extend_from_slice(&chunk[..to_take]);
+
+                    // Terminate download if max_bytes were reached
+                    remaining_bytes = remaining_bytes.saturating_sub(chunk.len());
+                    if remaining_bytes == 0 { break; }
                 }
                 collected_chunks
             }
@@ -182,7 +186,9 @@ mod tests {
     #[tokio::test]
     async fn test_is_downloaded_fragment_sufficient_for_parsing() {
         let client = Client::new();
-        let urls: Vec<YoutubeVideoUrl> = vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
+        let urls: Vec<YoutubeVideoUrl> = vec![
+            YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()
+        ];
         let fragments = download_htmls(client, urls, MAX_BYTES).await;
         let fragment = String::from_utf8(fragments[0].clone()).unwrap();
         let html = Html::parse_document(fragment.as_str());
