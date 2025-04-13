@@ -1,5 +1,5 @@
 // TODO: Replace `Box<dyn std::error::Error>` with enums derived from `thiserror` crate
-use busytube::{download_htmls, Metada, YoutubeVideoUrl, MAX_BYTES};
+use busytube::{download_htmls, Metada, YoutubeVideoUrl, MAX_BYTES, OFFSET_CHUNKS};
 use reqwest::Client;
 use scraper::Html;
 use std::env;
@@ -40,7 +40,7 @@ async fn main() -> std::io::Result<()> {
         .collect();
 
     let client = Client::new();
-    let htmls = download_htmls(&client, urls, MAX_BYTES).await;
+    let htmls = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS).await;
     for text in htmls {
         let html = String::from_utf8(text).unwrap();
         let meta = Metada::new(Html::parse_document(html.as_str()));

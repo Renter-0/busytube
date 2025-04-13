@@ -1,4 +1,3 @@
-// TODO: Properly handle error handling
 use futures::{stream, StreamExt};
 use regex::Regex;
 use reqwest::{Client, Url};
@@ -7,7 +6,9 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::time::Duration;
 
-pub const MAX_BYTES: usize = 569993;
+pub const MAX_BYTES: usize = 70000;
+pub const OFFSET_CHUNKS: usize = 360;
+
 #[derive(Debug, Clone)]
 pub struct YoutubeVideoUrl {
     inner: Url,
@@ -65,6 +66,7 @@ pub async fn download_htmls(
     client: &Client,
     links: Vec<YoutubeVideoUrl>,
     max_bytes: usize,
+    offset_chunk_number: usize,
 ) -> Vec<Vec<u8>> {
     // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
     // afterwards
@@ -73,7 +75,13 @@ pub async fn download_htmls(
         .map(|url| {
             // Download content up to max_bytes
             async move {
-                let mut byte_stream = client.get(url.inner).send().await.unwrap().bytes_stream();
+                let mut byte_stream = client
+                    .get(url.inner)
+                    .send()
+                    .await
+                    .unwrap()
+                    .bytes_stream()
+                    .skip(offset_chunk_number);
                 let mut collected_chunks = Vec::with_capacity(max_bytes);
                 let mut remaining_bytes = max_bytes;
 
@@ -178,13 +186,13 @@ impl Metada {
 
 #[cfg(test)]
 mod tests {
-    use super::{download_htmls, Client, Html, Metada, YoutubeVideoUrl, MAX_BYTES};
+    use super::{download_htmls, Client, Html, Metada, YoutubeVideoUrl, MAX_BYTES, OFFSET_CHUNKS};
     #[tokio::test]
     async fn test_download_htmls_length() {
         let client = Client::new();
         let url: Vec<YoutubeVideoUrl> =
             vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
-        let chunk = download_htmls(&client, url, MAX_BYTES).await;
+        let chunk = download_htmls(&client, url, MAX_BYTES, OFFSET_CHUNKS).await;
         assert_eq!(MAX_BYTES, chunk[0].len());
     }
 
@@ -193,7 +201,7 @@ mod tests {
         let client = Client::new();
         let urls: Vec<YoutubeVideoUrl> =
             vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
-        let fragments = download_htmls(&client, urls, MAX_BYTES).await;
+        let fragments = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS).await;
         let fragment = String::from_utf8(fragments[0].clone()).unwrap();
         let html = Html::parse_document(fragment.as_str());
 
