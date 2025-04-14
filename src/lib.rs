@@ -67,7 +67,7 @@ pub async fn download_htmls(
     links: Vec<YoutubeVideoUrl>,
     max_bytes: usize,
     offset_chunk_number: usize,
-) -> Vec<Vec<u8>> {
+) -> Vec<Result<Vec<u8>, Box<dyn std::error::Error>>> {
     // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
     // afterwards
     let concurent_requests = links.len();
@@ -78,15 +78,14 @@ pub async fn download_htmls(
                 let mut byte_stream = client
                     .get(url.inner)
                     .send()
-                    .await
-                    .unwrap()
+                    .await?
                     .bytes_stream()
                     .skip(offset_chunk_number);
                 let mut collected_chunks = Vec::with_capacity(max_bytes);
                 let mut remaining_bytes = max_bytes;
 
                 while let Some(chunk) = byte_stream.next().await {
-                    let chunk = chunk.unwrap();
+                    let chunk = chunk?;
 
                     // Prevent memory re-allocations if chunk exceeds max_bytes
                     let to_take = std::cmp::min(remaining_bytes, chunk.len());
@@ -98,7 +97,7 @@ pub async fn download_htmls(
                         break;
                     }
                 }
-                collected_chunks
+                Ok(collected_chunks)
             }
         })
         .buffer_unordered(concurent_requests)
@@ -107,19 +106,25 @@ pub async fn download_htmls(
 }
 
 impl Metada {
-    // NOTE: Most of the parts that can error here are due to not getting a valid youtube URL
-    pub fn new(html: Html) -> Metada {
+    pub fn new(html: Html) -> Result<Metada, &'static str> {
         let title_selector = Selector::parse("title").unwrap();
-        let title = html.select(&title_selector).next().unwrap().inner_html();
+        let title = html
+            .select(&title_selector)
+            .next()
+            .ok_or("Title wasn't found in provided HTML")?
+            .inner_html();
+
         let binding = Selector::parse("body script").unwrap();
         let script_block = html.select(&binding);
+
+        // NOTE: Regex can be stored somewhere else so it is compiled only once
         let re = Regex::new(r#""approxDurationMs":"(\d+)""#)
             .expect("Regex for approximate duration couldn't be compiled");
 
         let dur: u64 = script_block
             .flat_map(|elemref| elemref.text())
             .find_map(|text| re.captures(text).take())
-            .unwrap()[1]
+            .ok_or("Regex didn't find approxDurationMs")?[1]
             .parse()
             .expect("Regex found non numeric value while searching for approxDurationMs");
 
@@ -132,9 +137,10 @@ impl Metada {
             .select(&img_src)
             .next()
             .and_then(|elem| elem.value().attr("href"))
-            .expect("href wasn't found for image_src selector")
+            .ok_or("URL for img wasn't found in provided HTML")?
             .try_into()
-            .unwrap();
+            // TODO: Handle reqwest::ParseError
+            .map_err(|_| "Couldn't convert href to Url")?;
 
         let url_selector =
             Selector::parse("meta[property='og:url']").expect("Selector for URL didn't compile");
@@ -143,43 +149,40 @@ impl Metada {
             .select(&url_selector)
             .next()
             .and_then(|elem| elem.value().attr("content"))
-            .expect("content attr wasn't found for url selector")
+            .ok_or("Video URL wasn't found in provided HTML")?
             .try_into()
-            .unwrap();
+            // TODO: Handle reqwest::ParseError
+            .map_err(|_| "Couldn't selected href's content into Url")?;
 
-        Self {
+        Ok(Self {
             title,
             url,
             duration: dur,
             img_url,
             img_name: uuid::Uuid::new_v4().to_string() + ".jpg",
-        }
+        })
     }
+
     /// Downloads image URL extracted from youtuble link and saves it
     /// using `UUID v4` as the name and `jpg` as file extension
     pub async fn save_thumbnail(
         &self,
         thumbnail_dir: &Path,
         client: Client,
-    ) -> Result<(), std::io::ErrorKind> {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if !thumbnail_dir.exists() {
             let mut dir_builder = std::fs::DirBuilder::new();
             dir_builder.recursive(true).create(thumbnail_dir).unwrap();
         }
-        if !thumbnail_dir.is_dir() {
-            return Err(std::io::ErrorKind::NotADirectory);
-        }
-        let mut file = std::fs::File::create(thumbnail_dir.join(self.img_name.as_str())).unwrap();
+        let mut file = std::fs::File::create(thumbnail_dir.join(self.img_name.as_str()))?;
 
         let contents = client
             .get(self.img_url.as_str())
             .send()
-            .await
-            .unwrap()
+            .await?
             .bytes()
-            .await
-            .unwrap();
-        file.write_all(&contents).unwrap();
+            .await?;
+        file.write_all(&contents)?;
         Ok(())
     }
 }
@@ -193,7 +196,7 @@ mod tests {
         let url: Vec<YoutubeVideoUrl> =
             vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
         let chunk = download_htmls(&client, url, MAX_BYTES, OFFSET_CHUNKS).await;
-        assert_eq!(MAX_BYTES, chunk[0].len());
+        assert_eq!(MAX_BYTES, chunk[0].as_ref().unwrap().len());
     }
 
     #[tokio::test]
@@ -202,10 +205,10 @@ mod tests {
         let urls: Vec<YoutubeVideoUrl> =
             vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
         let fragments = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS).await;
-        let fragment = String::from_utf8(fragments[0].clone()).unwrap();
+        let fragment = String::from_utf8(fragments[0].as_ref().unwrap().clone()).unwrap();
         let html = Html::parse_document(fragment.as_str());
 
-        let meta = Metada::new(html);
+        let meta = Metada::new(html).unwrap();
 
         assert_eq!(
             meta.url.inner.as_str(),
