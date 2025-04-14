@@ -116,15 +116,15 @@ impl Metada {
         let re = Regex::new(r#""approxDurationMs":"(\d+)""#)
             .expect("Regex for approximate duration couldn't be compiled");
 
-        let dur: Option<String> = script_block
+        let dur: u64 = script_block
             .flat_map(|elemref| elemref.text())
-            .find_map(|text| re.captures(text).map(|cap| cap[1].into()));
+            .find_map(|text| re.captures(text).take())
+            .unwrap()[1]
+            .parse()
+            .expect("Regex found non numeric value while searching for approxDurationMs");
 
-        let dur = Duration::from_millis(
-            dur.expect("Duration errored")
-                .parse::<u64>()
-                .expect("Duration couldn't be created from duration string"),
-        );
+        let dur = Duration::from_millis(dur);
+
         let img_src = Selector::parse("link[rel='image_src']")
             .expect("Selector for image src didn't compile");
 
