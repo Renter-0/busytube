@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 pub const MAX_BYTES: usize = 70000;
-pub const OFFSET_CHUNKS: usize = 360;
+pub const OFFSET_CHUNKS_COUNT: usize = 360;
 
 #[derive(Debug, Clone)]
 pub struct YoutubeVideoUrl {
@@ -189,13 +189,15 @@ impl Metada {
 
 #[cfg(test)]
 mod tests {
-    use super::{download_htmls, Client, Html, Metada, YoutubeVideoUrl, MAX_BYTES, OFFSET_CHUNKS};
+    use super::{
+        download_htmls, Client, Html, Metada, YoutubeVideoUrl, MAX_BYTES, OFFSET_CHUNKS_COUNT,
+    };
     #[tokio::test]
     async fn test_download_htmls_length() {
         let client = Client::new();
         let url: Vec<YoutubeVideoUrl> =
             vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
-        let chunk = download_htmls(&client, url, MAX_BYTES, OFFSET_CHUNKS).await;
+        let chunk = download_htmls(&client, url, MAX_BYTES, OFFSET_CHUNKS_COUNT).await;
         assert_eq!(MAX_BYTES, chunk[0].as_ref().unwrap().len());
     }
 
@@ -204,7 +206,7 @@ mod tests {
         let client = Client::new();
         let urls: Vec<YoutubeVideoUrl> =
             vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
-        let fragments = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS).await;
+        let fragments = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS_COUNT).await;
         let fragment = String::from_utf8(fragments[0].as_ref().unwrap().clone()).unwrap();
         let html = Html::parse_document(fragment.as_str());
 
