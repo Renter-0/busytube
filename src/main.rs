@@ -41,8 +41,9 @@ async fn main() -> std::io::Result<()> {
 
     let client = Client::new();
     let htmls = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS_COUNT).await;
-    while let Some(Ok(text)) = htmls.iter().next() {
-        let html = String::from_utf8(text.to_vec()).unwrap();
+    for text in htmls {
+        let text = text.unwrap().to_vec();
+        let html = String::from_utf8(text).unwrap();
         let meta = Metada::new(Html::parse_document(html.as_str())).unwrap();
         meta.save_thumbnail(&thumbnails, client.clone())
             .await
