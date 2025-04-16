@@ -6,14 +6,14 @@ For running the tool you'll need `cargo` to compile and optionally `git` to down
 ```bash
 git clone https://github.com/Renter-0/busytube.git
 cd busytube
-cargo run --release
+cargo build --release
 ```
 Or if you're using [`nix`](https://github.com/NixOS/nix) with flakes enabled you can just run
 ```bash
 git clone https://github.com/Renter-0/busytube.git
 cd busytube
 nix develop
-cargo run --release
+cargo build --release
 ```
 Then the binary will be in `target/release`
 To use it
