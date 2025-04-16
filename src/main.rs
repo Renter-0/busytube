@@ -1,6 +1,6 @@
 // TODO: Replace `Box<dyn std::error::Error>` with enums derived from `thiserror` crate
-use busytube::{download_htmls, Metada, YoutubeVideoUrl, MAX_BYTES, OFFSET_CHUNKS_COUNT};
-use reqwest::Client;
+use busytube::{download_htmls, Metada, MAX_BYTES, OFFSET_CHUNKS_COUNT};
+use reqwest::{Client, Url};
 use scraper::Html;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -34,9 +34,9 @@ async fn main() -> std::io::Result<()> {
     let contents = fs::read_to_string(file_with_urls).unwrap();
 
     // Collect valid Youtube Video sharing/viewing URLs
-    let urls: Vec<YoutubeVideoUrl> = contents
+    let urls: Vec<Url> = contents
         .lines()
-        .filter_map(|line| YoutubeVideoUrl::parse(line).ok())
+        .filter_map(|line| Url::parse(line).ok())
         .collect();
 
     let client = Client::new();
@@ -57,10 +57,10 @@ async fn main() -> std::io::Result<()> {
             .unwrap();
         if let Err(e) = writeln!(
             vid,
-            "[link::[{}]({})], [duration::{}min], ![](thumbnails/{})\n\n",
+            "[link::[{}](https://youtu.be/{})], [duration::{}min], ![](thumbnails/{})\n\n",
             meta.title,
-            meta.url.as_str(),
-            meta.duration.as_secs() / 60, // Convert to minutes
+            meta.id.as_str(),
+            std::time::Duration::from_millis(meta.duration.as_u64()).as_secs() / 60, // Convert to minutes
             meta.img_name
         ) {
             eprintln!("Couldn't write to a file {}", e);

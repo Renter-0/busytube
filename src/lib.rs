@@ -4,67 +4,72 @@ use reqwest::{Client, Url};
 use scraper::{Html, Selector};
 use std::io::prelude::*;
 use std::path::Path;
-use std::time::Duration;
 
 pub const MAX_BYTES: usize = 70000;
 pub const OFFSET_CHUNKS_COUNT: usize = 360;
 
-#[derive(Debug, Clone)]
-pub struct YoutubeVideoUrl {
-    inner: Url,
-}
-impl YoutubeVideoUrl {
-    pub fn parse(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let inner = Url::parse(url)?;
-        YoutubeVideoUrl::try_from(inner)
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct YoutubeVideoId(Box<str>);
+
+impl YoutubeVideoId {
+    pub fn parse(url: &str) -> Result<Self, &'static str> {
+        // Seperating regex via macros as format! produces String and not &str
+        macro_rules! DOMAIN_PATTERN {
+            () => {
+                r"(?:(?:www\.|m\.)?youtu(?:be\.com|\.be))"
+            };
+        }
+        macro_rules! VIDEO_PATTERN {
+            () => {
+                r"(?:watch\?v=|v/|embed/)?(?<id>[a-zA-Z0-9_-]{11})"
+            };
+        }
+        const YOUTUBE_PATTERN: &str =
+            std::concat!("https://", DOMAIN_PATTERN!(), "/", VIDEO_PATTERN!());
+        const ERR_MSG: &str = "Regex didn't find youtube id";
+
+        let url_validator = Regex::new(YOUTUBE_PATTERN).unwrap();
+        let id = url_validator
+            .captures(url)
+            .ok_or(ERR_MSG)?
+            .name("id")
+            .ok_or(ERR_MSG)?
+            .as_str()
+            .to_string()
+            .into_boxed_str();
+
+        Ok(Self { 0: id })
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0[..]
     }
 }
 
-impl std::ops::Deref for YoutubeVideoUrl {
-    type Target = Url;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-impl TryFrom<Url> for YoutubeVideoUrl {
-    type Error = Box<dyn std::error::Error>;
-    fn try_from(value: Url) -> Result<Self, Self::Error> {
-        // Currently all youtube videos start with these two
-        const YOUTUBE_DOMAINS: [&str; 2] = ["www.youtube.com", "youtu.be"];
-        if value
-            .domain()
-            .is_some_and(|domain| YOUTUBE_DOMAINS.contains(&domain))
-        {
-            Ok(Self { inner: value })
-        } else {
-            Err("Provided URL doesn't belong to Youtube's Video Sharing/Viewing".into())
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Millis(u64);
+
+impl Millis {
+    pub fn new(milliseconds: impl Into<u64>) -> Self {
+        Self {
+            0: milliseconds.into(),
         }
     }
-}
-impl<'a> TryFrom<&'a str> for YoutubeVideoUrl {
-    type Error = Box<dyn std::error::Error>;
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        YoutubeVideoUrl::parse(value)
-    }
-}
-impl std::ops::DerefMut for YoutubeVideoUrl {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+    pub fn as_u64(&self) -> u64 {
+        self.0
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Metada {
-    pub title: String,
-    pub url: YoutubeVideoUrl,
-    pub duration: Duration,
-    pub img_url: Url,
-    pub img_name: String,
+    pub title: Box<str>,
+    pub id: YoutubeVideoId,
+    pub duration: Millis,
+    pub img_name: Box<str>,
 }
 
 pub async fn download_htmls(
     client: &Client,
-    links: Vec<YoutubeVideoUrl>,
+    links: Vec<Url>,
     max_bytes: usize,
     offset_chunk_number: usize,
 ) -> Vec<Result<Vec<u8>, Box<dyn std::error::Error>>> {
@@ -76,7 +81,7 @@ pub async fn download_htmls(
             // Download content up to max_bytes
             async move {
                 let mut byte_stream = client
-                    .get(url.inner)
+                    .get(url)
                     .send()
                     .await?
                     .bytes_stream()
@@ -107,12 +112,14 @@ pub async fn download_htmls(
 
 impl Metada {
     pub fn new(html: Html) -> Result<Metada, &'static str> {
-        let title_selector = Selector::parse("title").unwrap();
+        let title_selector = Selector::parse("meta[name='title']").unwrap();
         let title = html
             .select(&title_selector)
             .next()
-            .ok_or("Title wasn't found in provided HTML")?
-            .inner_html();
+            .and_then(|elem| elem.value().attr("content"))
+            .ok_or("Title wasn't found")?
+            .to_string()
+            .into_boxed_str();
 
         let binding = Selector::parse("body script").unwrap();
         let script_block = html.select(&binding);
@@ -128,20 +135,6 @@ impl Metada {
             .parse()
             .expect("Regex found non numeric value while searching for approxDurationMs");
 
-        let dur = Duration::from_millis(dur);
-
-        let img_src = Selector::parse("link[rel='image_src']")
-            .expect("Selector for image src didn't compile");
-
-        let img_url: Url = html
-            .select(&img_src)
-            .next()
-            .and_then(|elem| elem.value().attr("href"))
-            .ok_or("URL for img wasn't found in provided HTML")?
-            .try_into()
-            // TODO: Handle reqwest::ParseError
-            .map_err(|_| "Couldn't convert href to Url")?;
-
         let url_selector =
             Selector::parse("meta[property='og:url']").expect("Selector for URL didn't compile");
 
@@ -149,17 +142,15 @@ impl Metada {
             .select(&url_selector)
             .next()
             .and_then(|elem| elem.value().attr("content"))
-            .ok_or("Video URL wasn't found in provided HTML")?
-            .try_into()
-            // TODO: Handle reqwest::ParseError
-            .map_err(|_| "Couldn't selected href's content into Url")?;
+            .ok_or("Video URL wasn't found in provided HTML")?;
+
+        let id = YoutubeVideoId::parse(url)?;
 
         Ok(Self {
             title,
-            url,
-            duration: dur,
-            img_url,
-            img_name: uuid::Uuid::new_v4().to_string() + ".jpg",
+            id,
+            duration: Millis::new(dur),
+            img_name: format!("{}.jpg", uuid::Uuid::new_v4()).into_boxed_str(),
         })
     }
 
@@ -170,18 +161,17 @@ impl Metada {
         thumbnail_dir: &Path,
         client: Client,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://i.ytimg.com/vi/{}/maxresdefault.jpg",
+            self.id.as_str()
+        );
         if !thumbnail_dir.exists() {
             let mut dir_builder = std::fs::DirBuilder::new();
             dir_builder.recursive(true).create(thumbnail_dir).unwrap();
         }
-        let mut file = std::fs::File::create(thumbnail_dir.join(self.img_name.as_str()))?;
+        let mut file = std::fs::File::create(thumbnail_dir.join(&self.img_name[..]))?;
 
-        let contents = client
-            .get(self.img_url.as_str())
-            .send()
-            .await?
-            .bytes()
-            .await?;
+        let contents = client.get(url).send().await?.bytes().await?;
         file.write_all(&contents)?;
         Ok(())
     }
@@ -190,13 +180,13 @@ impl Metada {
 #[cfg(test)]
 mod tests {
     use super::{
-        download_htmls, Client, Html, Metada, YoutubeVideoUrl, MAX_BYTES, OFFSET_CHUNKS_COUNT,
+        download_htmls, Client, Html, Metada, Url, YoutubeVideoId, MAX_BYTES, OFFSET_CHUNKS_COUNT,
     };
     #[tokio::test]
     async fn test_download_htmls_length() {
         let client = Client::new();
-        let url: Vec<YoutubeVideoUrl> =
-            vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
+        let url: Vec<Url> =
+            vec![Url::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
         let chunk = download_htmls(&client, url, MAX_BYTES, OFFSET_CHUNKS_COUNT).await;
         assert_eq!(MAX_BYTES, chunk[0].as_ref().unwrap().len());
     }
@@ -204,26 +194,35 @@ mod tests {
     #[tokio::test]
     async fn test_is_downloaded_fragment_sufficient_for_parsing() {
         let client = Client::new();
-        let urls: Vec<YoutubeVideoUrl> =
-            vec![YoutubeVideoUrl::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
+        let urls: Vec<Url> =
+            vec![Url::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
         let fragments = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS_COUNT).await;
         let fragment = String::from_utf8(fragments[0].as_ref().unwrap().clone()).unwrap();
         let html = Html::parse_document(fragment.as_str());
 
         let meta = Metada::new(html).unwrap();
 
+        assert_eq!(meta.id.as_str(), "h9Z4oGN89MU");
+        assert_eq!(meta.duration.as_u64(), 1709569);
         assert_eq!(
-            meta.url.inner.as_str(),
-            "https://www.youtube.com/watch?v=h9Z4oGN89MU"
+            &meta.title[..],
+            "How do Graphics Cards Work?  Exploring GPU Architecture"
         );
-        assert_eq!(meta.duration.as_millis(), 1709569);
-        assert_eq!(
-            meta.title,
-            "How do Graphics Cards Work?  Exploring GPU Architecture - YouTube"
-        );
-        assert_eq!(
-            meta.img_url.as_str(),
-            "https://i.ytimg.com/vi/h9Z4oGN89MU/maxresdefault.jpg"
-        );
+    }
+    #[test]
+    fn test_youtube_video_id_parse() {
+        const ID: &str = "h9Z4oGN89MU";
+        const URLS: [&str; 5] = [
+            "https://youtu.be/h9Z4oGN89MU",
+            "https://youtu.be/h9Z4oGN89MU?si=3lAgdXzkExZahlOO",
+            "https://www.youtube.com/watch?v=h9Z4oGN89MU",
+            "https://m.youtube.com/watch?v=h9Z4oGN89MU&pp=b3Jrcw%3D%39aGB33IGdwdSDygUN",
+            "https://m.youtube.com/watch?v=h9Z4oGN89MU&list=WL&index=1&t=12s&pp=QgAiAQBB",
+        ];
+        for url in URLS {
+            let parsed = YoutubeVideoId::parse(url);
+            assert!(parsed.is_ok());
+            assert_eq!(parsed.unwrap().as_str(), ID);
+        }
     }
 }
