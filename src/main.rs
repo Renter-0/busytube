@@ -1,37 +1,39 @@
 // TODO: Replace `Box<dyn std::error::Error>` with enums derived from `thiserror` crate
 use busytube::{download_htmls, Metada, MAX_BYTES, OFFSET_CHUNKS_COUNT};
+use clap::Parser;
 use reqwest::{Client, Url};
 use scraper::Html;
-use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
-use std::path::Path;
+use std::path::PathBuf;
 
+#[derive(Parser)]
+#[command(version, about="YouTube scrapper to get video's title, duration and thumbnail", long_about=None)]
+struct Cli {
+    url_file: PathBuf,
+    output_dir: PathBuf,
+}
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let args: Vec<String> = env::args().collect();
+    let args = Cli::parse();
 
-    if args.len() < 2 {
-        println!("No arguments supplied\nUsage:\nbusytube URLFILE VAULTPATH");
-        return Ok(());
-    }
-    let file_with_urls = Path::new(&args[1]);
-    let vault = Path::new(&args[2]);
+    let url_file = args.url_file;
+    let output_dir = args.output_dir;
 
     // Construct OS independend paths
-    let videos = vault.join("storage").join("videos.md");
-    let thumbnails = vault.join("storage").join("thumbnails");
+    let videos = output_dir.join("videos.md");
+    let thumbnails = output_dir.join("thumbnails");
 
     // This checks allows to unwrap read_to_string also it can panic on other errors
     // TODO: Account for less likely errors returned by OpenOptions
-    if !file_with_urls.exists() {
+    if !url_file.exists() {
         println!(
             "Filepath \"{}\" doesn't exist\nCan't read its content",
-            file_with_urls.display()
+            url_file.display()
         );
         return Ok(());
     }
-    let contents = fs::read_to_string(file_with_urls).unwrap();
+    let contents = fs::read_to_string(url_file).unwrap();
 
     // Collect valid Youtube Video sharing/viewing URLs
     let urls: Vec<Url> = contents
