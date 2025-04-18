@@ -11,7 +11,7 @@ Simple CLI tool to extract video's title, duration and thumbnail. Created to wor
 - `git` to clone the repository (Optional)
 
 > [!NOTE]
-> If you have [`nix`](https://github.com/NixOS/nix) package manager installed with flakes enabled you can run `nix develop` to get the mandatory requisites
+> If you have [`nix`](https://github.com/NixOS/nix) package manager installed with flakes enabled you can run `nix develop` to get the mandatory requirements
 
 ## Compiling
 
@@ -28,5 +28,16 @@ Then the binary will be in `target/release`
 To use it
 ```bash
 # Run inside the directory where you compiled the project
-./target/release/busytube FILE_WITH_URLS OUTPUT_DIR
+./target/release/busytube --help
+YouTube scrapper to get video's title, duration and thumbnail
+
+Usage: busytube <URL_FILE> <OUTPUT_DIR>
+
+Arguments:
+  <URL_FILE>
+  <OUTPUT_DIR>
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```
