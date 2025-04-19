@@ -1,26 +1,21 @@
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs = {
     self,
     nixpkgs,
-  }: let
-    system = "x86_64-linux";
-    pkgs = import nixpkgs {inherit system;};
-  in {
-    devShells.${system}.default = pkgs.mkShell {
-      buildInputs = [
-        pkgs.openssl
-        pkgs.pkg-config
-        pkgs.rustc
-        pkgs.cargo
-        pkgs.rust-analyzer
-        pkgs.rustfmt
-        pkgs.clippy
-        pkgs.gcc
-      ];
-    };
-  };
+    flake-utils,
+  }:
+    flake-utils.lib.eachSystem flake-utils.lib.allSystems (system: let
+      pkgs = nixpkgs.legacyPackages.${system};
+    in {
+      devShells.default = pkgs.callPackage ./shell.nix {inherit pkgs;};
+      packages.default = pkgs.callPackage ./default.nix {
+        inherit pkgs;
+        src = self;
+      };
+    });
 }
