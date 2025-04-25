@@ -82,7 +82,7 @@ jobs:
           ${{ matrix.archive_command }} ../${{ matrix.archive_name }} ${{ steps.binary.outputs.BIN_NAME }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.archive_name }}
           path: ${{ matrix.archive_name }}
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload to GitHub Release
         if: github.event_name == 'release'
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
