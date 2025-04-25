@@ -1,5 +1,4 @@
 name: Build and Release
-
 on:
   push:
     tags:
@@ -24,12 +23,12 @@ jobs:
             target: aarch64-unknown-linux-gnu
             archive_name: app-linux-aarch64.tar.gz
             archive_command: tar -czf
-
+          
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive_name: app-windows-x86_64.zip
             archive_command: 7z a -tzip
-
+          
           - os: windows-latest
             target: i686-pc-windows-msvc
             archive_name: app-windows-i686.zip
@@ -47,20 +46,11 @@ jobs:
           override: true
           profile: minimal
 
-      - name: Install cross-compilation dependencies for aarch64 with OpenSSL
+      - name: Install cross-compilation dependencies
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          # Install OpenSSL development libraries for aarch64
-          sudo apt-get install -y libssl-dev pkg-config
-          sudo apt-get install -y gcc-multilib
-          sudo apt-get install -y libssl-dev:arm64
-          # Create symlink to find OpenSSL properly
-          mkdir -p ~/.cargo
-          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config
-          echo 'rustflags = ["-C", "link-arg=-lgcc"]' >> ~/.cargo/config
 
       - name: Build project
         uses: actions-rs/cargo@v1
@@ -69,20 +59,12 @@ jobs:
           args: --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          # For aarch64 OpenSSL configuration
-          OPENSSL_DIR: /usr
-          OPENSSL_INCLUDE_DIR: /usr/include
-          OPENSSL_LIB_DIR: /usr/lib/aarch64-linux-gnu
-          # Tell the openssl crate to use the system OpenSSL
-          OPENSSL_STATIC: "1"
-          PKG_CONFIG_ALLOW_CROSS: "1"
-          PKG_CONFIG_PATH: "/usr/lib/aarch64-linux-gnu/pkgconfig"
-          PKG_CONFIG_SYSROOT_DIR: "/"
 
       - name: Set binary name
         id: binary
         shell: bash
         run: |
+          # Extract your project name from Cargo.toml (assumes standard format)
           PROJECT_NAME=$(grep -m1 "name" Cargo.toml | cut -d '"' -f2 | cut -d "'" -f2)
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
             echo "BIN_NAME=${PROJECT_NAME}.exe" >> $GITHUB_OUTPUT
@@ -109,7 +91,10 @@ jobs:
       - name: Upload to GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
-        with:
-          files: ${{ matrix.archive_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./${{ matrix.archive_name }}
+          asset_name: ${{ matrix.archive_name }}
+          asset_content_type: application/octet-stream
