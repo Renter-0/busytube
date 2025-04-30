@@ -1,10 +1,5 @@
 name: Build and Release
-on:
-  push:
-    tags:
-      - 'v*'
-  release:
-    types: [created]
+on: workflow_dispatch
 
 jobs:
   build:
@@ -23,12 +18,12 @@ jobs:
             target: aarch64-unknown-linux-gnu
             archive_name: app-linux-aarch64.tar.gz
             archive_command: tar -czf
-          
+
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive_name: app-windows-x86_64.zip
             archive_command: 7z a -tzip
-          
+
           - os: windows-latest
             target: i686-pc-windows-msvc
             archive_name: app-windows-i686.zip
