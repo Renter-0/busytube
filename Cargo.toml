@@ -11,6 +11,6 @@ categories = ["command-line-utilities", "web-programming"]
 [dependencies]
 futures = "0.3.31"
 regex = "1.11.1"
-reqwest = { version = "0.12.12", features = ["stream"] }
+reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls", "charset", "http2", "system-proxy", "stream"] }
 scraper = "0.22.0"
 tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
