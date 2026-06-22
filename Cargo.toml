@@ -1,6 +1,6 @@
 [package]
 name = "busytube"
-version = "0.1.0"
+version = "0.1.5"
 edition = "2021"
 description = "A CLI tool for extracting video titles, durations, and thumbnails"
 license = "MIT"
