@@ -1,8 +1,8 @@
 // TODO: Replace `Box<dyn std::error::Error>` with enums derived from `thiserror` crate
-use busytube::{download_htmls, Metada, MAX_BYTES, OFFSET_CHUNKS_COUNT};
+use busytube::{MetadataBuilder, MAX_BYTES, OFFSET_CHUNKS_COUNT};
 use clap::Parser;
+use futures::{stream, StreamExt};
 use reqwest::{Client, Url};
-use scraper::Html;
 use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
 use std::path::PathBuf;
@@ -42,14 +42,15 @@ async fn main() -> std::io::Result<()> {
         .collect();
 
     let client = Client::new();
-    let htmls = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS_COUNT).await;
-    for text in htmls {
-        let text = text.unwrap().to_vec();
-        let html = String::from_utf8(text).unwrap();
-        let meta = Metada::new(Html::parse_document(html.as_str())).unwrap();
-        meta.save_thumbnail(&thumbnails, client.clone())
-            .await
-            .unwrap();
+    let metadata_builder = MetadataBuilder::new(&client, MAX_BYTES, OFFSET_CHUNKS_COUNT);
+    let concurrent_downloads = urls.len().max(1);
+    let mut metadata = stream::iter(urls)
+        .map(|url| metadata_builder.build(url))
+        .buffer_unordered(concurrent_downloads);
+
+    while let Some(metadata) = metadata.next().await {
+        let meta = metadata.unwrap();
+        meta.save_thumbnail(&thumbnails, &client).await.unwrap();
 
         // Append extracted metadata to videos' file in specified format
         let mut vid = OpenOptions::new()
@@ -65,7 +66,7 @@ async fn main() -> std::io::Result<()> {
             std::time::Duration::from_millis(meta.duration.as_u64()).as_secs() / 60, // Convert to minutes
             meta.img_name
         ) {
-            eprintln!("Couldn't write to a file {}", e);
+            eprintln!("Couldn't write to a file {e}");
         }
     }
 

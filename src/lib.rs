@@ -1,4 +1,4 @@
-use futures::{stream, StreamExt};
+use futures::StreamExt;
 use regex::Regex;
 use reqwest::{Client, Url};
 use scraper::{Html, Selector};
@@ -38,8 +38,9 @@ impl YoutubeVideoId {
             .to_string()
             .into_boxed_str();
 
-        Ok(Self { 0: id })
+        Ok(Self(id))
     }
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0[..]
     }
@@ -50,68 +51,67 @@ pub struct Millis(u64);
 
 impl Millis {
     pub fn new(milliseconds: impl Into<u64>) -> Self {
-        Self {
-            0: milliseconds.into(),
-        }
+        Self(milliseconds.into())
     }
-    pub fn as_u64(&self) -> u64 {
+    #[must_use]
+    pub const fn as_u64(&self) -> u64 {
         self.0
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Metada {
+pub struct Metadata {
     pub title: Box<str>,
     pub id: YoutubeVideoId,
     pub duration: Millis,
     pub img_name: Box<str>,
 }
 
-pub async fn download_htmls(
-    client: &Client,
-    links: Vec<Url>,
+pub struct MetadataBuilder<'a> {
+    client: &'a Client,
     max_bytes: usize,
     offset_chunk_number: usize,
-) -> Vec<Result<Vec<u8>, Box<dyn std::error::Error>>> {
-    // Creates multiple concurrent get requests and collects resulting HTML as the download finishes
-    // afterwards
-    let concurent_requests = links.len();
-    stream::iter(links)
-        .map(|url| {
-            // Download content up to max_bytes
-            async move {
-                let mut byte_stream = client
-                    .get(url)
-                    .send()
-                    .await?
-                    .bytes_stream()
-                    .skip(offset_chunk_number);
-                let mut collected_chunks = Vec::with_capacity(max_bytes);
-                let mut remaining_bytes = max_bytes;
-
-                while let Some(chunk) = byte_stream.next().await {
-                    let chunk = chunk?;
-
-                    // Prevent memory re-allocations if chunk exceeds max_bytes
-                    let to_take = std::cmp::min(remaining_bytes, chunk.len());
-                    collected_chunks.extend_from_slice(&chunk[..to_take]);
-
-                    // Terminate download if max_bytes were reached
-                    remaining_bytes = remaining_bytes.saturating_sub(chunk.len());
-                    if remaining_bytes == 0 {
-                        break;
-                    }
-                }
-                Ok(collected_chunks)
-            }
-        })
-        .buffer_unordered(concurent_requests)
-        .collect()
-        .await
 }
 
-impl Metada {
-    pub fn new(html: Html) -> Result<Metada, &'static str> {
+impl<'a> MetadataBuilder<'a> {
+    #[must_use]
+    pub const fn new(client: &'a Client, max_bytes: usize, offset_chunk_number: usize) -> Self {
+        Self {
+            client,
+            max_bytes,
+            offset_chunk_number,
+        }
+    }
+
+    pub async fn build(&self, url: Url) -> Result<Metadata, Box<dyn std::error::Error>> {
+        let mut byte_stream = self
+            .client
+            .get(url)
+            .send()
+            .await?
+            .bytes_stream()
+            .skip(self.offset_chunk_number);
+        let mut contents = Vec::with_capacity(self.max_bytes);
+        let mut remaining_bytes = self.max_bytes;
+
+        while let Some(chunk) = byte_stream.next().await {
+            let chunk = chunk?;
+            let to_take = std::cmp::min(remaining_bytes, chunk.len());
+            contents.extend_from_slice(&chunk[..to_take]);
+            remaining_bytes = remaining_bytes.saturating_sub(chunk.len());
+            if remaining_bytes == 0 {
+                break;
+            }
+        }
+
+        let html = String::from_utf8(contents)?;
+        Metadata::new(Html::parse_document(&html))
+            .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message).into())
+    }
+}
+
+impl Metadata {
+    pub fn new(html: Html) -> Result<Self, &'static str> {
         let title_selector = Selector::parse("meta[name='title']").unwrap();
         let title = html
             .select(&title_selector)
@@ -130,7 +130,7 @@ impl Metada {
 
         let dur: u64 = script_block
             .flat_map(|elemref| elemref.text())
-            .find_map(|text| re.captures(text).take())
+            .find_map(|text| re.captures(text))
             .ok_or("Regex didn't find approxDurationMs")?[1]
             .parse()
             .expect("Regex found non numeric value while searching for approxDurationMs");
@@ -159,7 +159,7 @@ impl Metada {
     pub async fn save_thumbnail(
         &self,
         thumbnail_dir: &Path,
-        client: Client,
+        client: &Client,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let url = format!(
             "https://i.ytimg.com/vi/{}/maxresdefault.jpg",
@@ -179,31 +179,21 @@ impl Metada {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        download_htmls, Client, Html, Metada, Url, YoutubeVideoId, MAX_BYTES, OFFSET_CHUNKS_COUNT,
-    };
-    #[tokio::test]
-    async fn test_download_htmls_length() {
-        let client = Client::new();
-        let url: Vec<Url> =
-            vec![Url::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
-        let chunk = download_htmls(&client, url, MAX_BYTES, OFFSET_CHUNKS_COUNT).await;
-        assert_eq!(MAX_BYTES, chunk[0].as_ref().unwrap().len());
-    }
+    use super::{Html, Metadata, YoutubeVideoId};
 
-    #[tokio::test]
-    async fn test_is_downloaded_fragment_sufficient_for_parsing() {
-        let client = Client::new();
-        let urls: Vec<Url> =
-            vec![Url::parse("https://www.youtube.com/watch?v=h9Z4oGN89MU").unwrap()];
-        let fragments = download_htmls(&client, urls, MAX_BYTES, OFFSET_CHUNKS_COUNT).await;
-        let fragment = String::from_utf8(fragments[0].as_ref().unwrap().clone()).unwrap();
-        let html = Html::parse_document(fragment.as_str());
-
-        let meta = Metada::new(html).unwrap();
+    #[test]
+    fn test_metadata_from_html() {
+        let html = Html::parse_document(
+            r#"
+                <meta name="title" content="How do Graphics Cards Work?  Exploring GPU Architecture">
+                <meta property="og:url" content="https://www.youtube.com/watch?v=h9Z4oGN89MU">
+                <body><script>{"approxDurationMs":"1709569"}</script></body>
+            "#,
+        );
+        let meta = Metadata::new(html).unwrap();
 
         assert_eq!(meta.id.as_str(), "h9Z4oGN89MU");
-        assert_eq!(meta.duration.as_u64(), 1709569);
+        assert_eq!(meta.duration.as_u64(), 1_709_569);
         assert_eq!(
             &meta.title[..],
             "How do Graphics Cards Work?  Exploring GPU Architecture"
