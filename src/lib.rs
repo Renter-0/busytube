@@ -8,6 +8,11 @@ use std::path::Path;
 pub const MAX_BYTES: usize = 70000;
 pub const OFFSET_CHUNKS_COUNT: usize = 360;
 
+// `--`, the 11-character YouTube ID, and `.jpg` use 17 of the 255 bytes allowed
+// for a portable filename component, leaving 238 bytes for the title.
+const MAX_THUMBNAIL_TITLE_BYTES: usize = 238;
+const INVALID_FILENAME_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct YoutubeVideoId(Box<str>);
 
@@ -142,18 +147,87 @@ impl<'a> MetadataBuilder<'a> {
 
         let id = YoutubeVideoId::parse(url)?;
 
+        let img_name = thumbnail_filename(&title, &id);
+
         Ok(Metadata {
             title,
             id,
             duration: Millis::new(dur),
-            img_name: format!("{}.jpg", uuid::Uuid::new_v4()).into_boxed_str(),
+            img_name,
         })
     }
 }
 
+fn thumbnail_filename(title: &str, id: &YoutubeVideoId) -> Box<str> {
+    // Reserve one byte for a possible Windows-device-name prefix.
+    let mut sanitized: String = truncate_to_byte_length(title, MAX_THUMBNAIL_TITLE_BYTES - 1)
+        .chars()
+        .map(|character| {
+            if character.is_control() || INVALID_FILENAME_CHARS.contains(&character) {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect();
+
+    while matches!(sanitized.chars().last(), Some(' ' | '.')) {
+        sanitized.pop();
+    }
+    if sanitized.is_empty() {
+        sanitized.push_str("untitled");
+    } else if is_windows_reserved_name(&sanitized) {
+        sanitized.insert(0, '_');
+    }
+
+    format!("{sanitized}--{}.jpg", id.as_str()).into_boxed_str()
+}
+
+fn truncate_to_byte_length(value: &str, maximum_length: usize) -> &str {
+    if value.len() <= maximum_length {
+        return value;
+    }
+
+    let mut end = maximum_length;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    &value[..end]
+}
+
+fn is_windows_reserved_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name);
+    matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
 impl Metadata {
     /// Downloads image URL extracted from youtuble link and saves it
-    /// using `UUID v4` as the name and `jpg` as file extension
+    /// using a sanitized title and `YouTube` video ID as the `jpg` filename
     pub async fn save_thumbnail(
         &self,
         thumbnail_dir: &Path,
@@ -177,7 +251,7 @@ impl Metadata {
 
 #[cfg(test)]
 mod tests {
-    use super::{Client, Html, MetadataBuilder, YoutubeVideoId};
+    use super::{thumbnail_filename, Client, Html, MetadataBuilder, YoutubeVideoId};
 
     #[test]
     fn test_metadata_from_html() {
@@ -198,6 +272,10 @@ mod tests {
             &meta.title[..],
             "How do Graphics Cards Work?  Exploring GPU Architecture"
         );
+        assert_eq!(
+            &meta.img_name[..],
+            "How do Graphics Cards Work_  Exploring GPU Architecture--h9Z4oGN89MU.jpg"
+        );
     }
     #[test]
     fn test_youtube_video_id_parse() {
@@ -214,5 +292,43 @@ mod tests {
             assert!(parsed.is_ok());
             assert_eq!(parsed.unwrap().as_str(), ID);
         }
+    }
+
+    #[test]
+    fn thumbnail_filename_sanitizes_forbidden_characters_and_trailing_characters() {
+        let id = YoutubeVideoId::parse("https://youtu.be/h9Z4oGN89MU").unwrap();
+
+        assert_eq!(
+            thumbnail_filename("A<>:\"/\\|?*\u{0000}B.  ", &id).as_ref(),
+            "A__________B--h9Z4oGN89MU.jpg"
+        );
+    }
+
+    #[test]
+    fn thumbnail_filename_handles_empty_and_reserved_names() {
+        let id = YoutubeVideoId::parse("https://youtu.be/h9Z4oGN89MU").unwrap();
+
+        assert_eq!(
+            thumbnail_filename(" . ", &id).as_ref(),
+            "untitled--h9Z4oGN89MU.jpg"
+        );
+        assert_eq!(
+            thumbnail_filename("CON", &id).as_ref(),
+            "_CON--h9Z4oGN89MU.jpg"
+        );
+    }
+
+    #[test]
+    fn thumbnail_filename_limits_length_without_breaking_unicode_or_uniqueness() {
+        let first_id = YoutubeVideoId::parse("https://youtu.be/h9Z4oGN89MU").unwrap();
+        let second_id = YoutubeVideoId::parse("https://youtu.be/dQw4w9WgXcQ").unwrap();
+        let filename = thumbnail_filename(&"😀".repeat(100), &first_id);
+
+        assert!(filename.len() <= 255);
+        assert!(filename.ends_with("--h9Z4oGN89MU.jpg"));
+        assert_ne!(
+            thumbnail_filename("Same title", &first_id),
+            thumbnail_filename("Same title", &second_id)
+        );
     }
 }
