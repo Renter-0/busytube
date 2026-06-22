@@ -44,12 +44,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # rustup provides ARM64 Rust libraries; GCC supplies the Linux linker for the final executable.
-      - name: Install ARM64 linker
+      # rustup provides ARM64 Rust libraries; this toolchain compiles and links ring's ARM64 C code.
+      - name: Install ARM64 toolchain
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build project
