@@ -53,7 +53,7 @@ impl Millis {
     pub fn new(milliseconds: impl Into<u64>) -> Self {
         Self(milliseconds.into())
     }
-    #[must_use]
+
     pub const fn as_u64(&self) -> u64 {
         self.0
     }
@@ -71,15 +71,22 @@ pub struct MetadataBuilder<'a> {
     client: &'a Client,
     max_bytes: usize,
     offset_chunk_number: usize,
+    title_selector: Selector,
+    script_selector: Selector,
+    duration_regex: Regex,
+    url_selector: Selector,
 }
 
 impl<'a> MetadataBuilder<'a> {
-    #[must_use]
-    pub const fn new(client: &'a Client, max_bytes: usize, offset_chunk_number: usize) -> Self {
+    pub fn new(client: &'a Client, max_bytes: usize, offset_chunk_number: usize) -> Self {
         Self {
             client,
             max_bytes,
             offset_chunk_number,
+            title_selector: Selector::parse("meta[name='title']").unwrap(),
+            script_selector: Selector::parse("body script").unwrap(),
+            duration_regex: Regex::new(r#""approxDurationMs":"(\d+)""#).unwrap(),
+            url_selector: Selector::parse("meta[property='og:url']").unwrap(),
         }
     }
 
@@ -105,55 +112,46 @@ impl<'a> MetadataBuilder<'a> {
         }
 
         let html = String::from_utf8(contents)?;
-        Metadata::new(Html::parse_document(&html))
+        self.parse_metadata(&Html::parse_document(&html))
             .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message).into())
     }
-}
 
-impl Metadata {
-    pub fn new(html: Html) -> Result<Self, &'static str> {
-        let title_selector = Selector::parse("meta[name='title']").unwrap();
+    pub fn parse_metadata(&self, html: &Html) -> Result<Metadata, &'static str> {
         let title = html
-            .select(&title_selector)
+            .select(&self.title_selector)
             .next()
             .and_then(|elem| elem.value().attr("content"))
             .ok_or("Title wasn't found")?
             .to_string()
             .into_boxed_str();
 
-        let binding = Selector::parse("body script").unwrap();
-        let script_block = html.select(&binding);
-
-        // NOTE: Regex can be stored somewhere else so it is compiled only once
-        let re = Regex::new(r#""approxDurationMs":"(\d+)""#)
-            .expect("Regex for approximate duration couldn't be compiled");
+        let script_block = html.select(&self.script_selector);
 
         let dur: u64 = script_block
             .flat_map(|elemref| elemref.text())
-            .find_map(|text| re.captures(text))
+            .find_map(|text| self.duration_regex.captures(text))
             .ok_or("Regex didn't find approxDurationMs")?[1]
             .parse()
             .expect("Regex found non numeric value while searching for approxDurationMs");
 
-        let url_selector =
-            Selector::parse("meta[property='og:url']").expect("Selector for URL didn't compile");
-
         let url = html
-            .select(&url_selector)
+            .select(&self.url_selector)
             .next()
             .and_then(|elem| elem.value().attr("content"))
             .ok_or("Video URL wasn't found in provided HTML")?;
 
         let id = YoutubeVideoId::parse(url)?;
 
-        Ok(Self {
+        Ok(Metadata {
             title,
             id,
             duration: Millis::new(dur),
             img_name: format!("{}.jpg", uuid::Uuid::new_v4()).into_boxed_str(),
         })
     }
+}
 
+impl Metadata {
     /// Downloads image URL extracted from youtuble link and saves it
     /// using `UUID v4` as the name and `jpg` as file extension
     pub async fn save_thumbnail(
@@ -179,7 +177,7 @@ impl Metadata {
 
 #[cfg(test)]
 mod tests {
-    use super::{Html, Metadata, YoutubeVideoId};
+    use super::{Client, Html, MetadataBuilder, YoutubeVideoId};
 
     #[test]
     fn test_metadata_from_html() {
@@ -190,7 +188,9 @@ mod tests {
                 <body><script>{"approxDurationMs":"1709569"}</script></body>
             "#,
         );
-        let meta = Metadata::new(html).unwrap();
+        let client = Client::new();
+        let metadata_builder = MetadataBuilder::new(&client, 0, 0);
+        let meta = metadata_builder.parse_metadata(&html).unwrap();
 
         assert_eq!(meta.id.as_str(), "h9Z4oGN89MU");
         assert_eq!(meta.duration.as_u64(), 1_709_569);
